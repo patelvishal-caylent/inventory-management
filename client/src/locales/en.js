@@ -6,6 +6,7 @@ export default {
     orders: 'Orders',
     finance: 'Finance',
     demandForecast: 'Demand Forecast',
+    restocking: 'Restocking',
     companyName: 'Catalyst Components',
     subtitle: 'Inventory Management System'
   },
@@ -106,6 +107,8 @@ export default {
     title: 'Orders',
     description: 'View and manage customer orders',
     allOrders: 'All Orders',
+    submittedOrders: 'Submitted Orders',
+    noSubmittedOrders: 'No restock orders have been submitted yet',
     totalOrders: 'Total Orders',
     totalRevenue: 'Total Revenue',
     avgOrderValue: 'Avg Order Value',
@@ -125,7 +128,8 @@ export default {
       totalValue: 'Total Value',
       status: 'Status',
       expectedDelivery: 'Expected Delivery',
-      actualDelivery: 'Actual Delivery'
+      actualDelivery: 'Actual Delivery',
+      leadTime: 'Lead Time (Days)'
     }
   },
 
@@ -188,6 +192,34 @@ export default {
     }
   },
 
+  // Restocking
+  restocking: {
+    title: 'Restocking',
+    description: 'Plan budget-driven restock orders from the demand forecast',
+    budgetTitle: 'Restock Budget',
+    itemsSelected: 'Items Selected',
+    totalCost: 'Total Cost',
+    budgetRemaining: 'Budget Remaining',
+    uncoveredCost: 'Uncovered Shortage',
+    recommendations: 'Recommended Restock',
+    noShortages: 'No shortages found for the current filters',
+    included: 'Included',
+    overBudget: 'Over Budget',
+    placeOrder: 'Place Order',
+    placing: 'Placing Order...',
+    orderPlaced: 'Restock order {orderNumber} submitted, expected {expectedDelivery}',
+    table: {
+      sku: 'SKU',
+      itemName: 'Item Name',
+      onHand: 'On Hand',
+      forecastedDemand: 'Forecasted Demand',
+      shortage: 'Shortage',
+      unitCost: 'Unit Cost',
+      lineCost: 'Line Cost',
+      included: 'Status'
+    }
+  },
+
   // Filters
   filters: {
     timePeriod: 'Time Period',
@@ -204,6 +236,7 @@ export default {
     shipped: 'Shipped',
     processing: 'Processing',
     backordered: 'Backordered',
+    submitted: 'Submitted',
     inStock: 'In Stock',
     lowStock: 'Low Stock',
     adequate: 'Adequate'

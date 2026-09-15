@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
-from pydantic import BaseModel
+from datetime import datetime, timedelta
+from pydantic import BaseModel, Field
 from mock_data import inventory_items, orders, demand_forecasts, backlog_items, spending_summary, monthly_spending, category_spending, recent_transactions, purchase_orders
 
 app = FastAPI(title="Factory Inventory Management System")
@@ -13,6 +14,19 @@ QUARTER_MAP = {
     'Q3-2025': ['2025-07', '2025-08', '2025-09'],
     'Q4-2025': ['2025-10', '2025-11', '2025-12']
 }
+
+# Supplier lead times in days, by inventory category. A restock order ships as a
+# single consignment, so its lead time is the max across the categories it touches.
+RESTOCK_LEAD_TIME_DAYS = {
+    "Controllers": 28,      # fabbed silicon, typically on distributor allocation
+    "Circuit Boards": 21,   # multi-step fab queue, then assembly and test
+    "Actuators": 18,        # coil winding and magnet supply
+    "Sensors": 14,          # catalogue parts, usually distributor stock
+    "Power Supplies": 10,   # most commoditised, usually shelf stock
+}
+
+# Used when a SKU's category can't be resolved against inventory
+DEFAULT_LEAD_TIME_DAYS = 14
 
 def filter_by_month(items: list, month: Optional[str]) -> list:
     """Filter items by month/quarter based on order_date field"""
@@ -120,6 +134,34 @@ class CreatePurchaseOrderRequest(BaseModel):
     expected_delivery_date: str
     notes: Optional[str] = None
 
+class RestockOrderItem(BaseModel):
+    sku: str
+    name: str
+    quantity: int = Field(..., gt=0)
+    unit_cost: float = Field(..., ge=0)
+    # Optional on the way in; always resolved from inventory on the way out, so the
+    # lead-time lookup has a single source of truth
+    category: Optional[str] = None
+
+class RestockOrder(BaseModel):
+    id: str
+    order_number: str
+    items: List[RestockOrderItem]
+    status: str
+    created_date: str
+    expected_delivery: str
+    lead_time_days: int
+    total_value: float
+    budget: Optional[float] = None
+
+class CreateRestockOrderRequest(BaseModel):
+    items: List[RestockOrderItem] = Field(..., min_length=1)
+    budget: Optional[float] = None
+
+# In-memory store for submitted restock orders. Deliberately not backed by a JSON
+# file - these reset when the server restarts, matching the demo's read-only data.
+restock_orders: List[dict] = []
+
 # API endpoints
 @app.get("/")
 def root():
@@ -178,6 +220,53 @@ def get_backlog():
         item_dict["has_purchase_order"] = has_po
         result.append(item_dict)
     return result
+
+@app.get("/api/restock-orders", response_model=List[RestockOrder])
+def get_restock_orders():
+    """Get all submitted restock orders"""
+    return [dict(order) for order in restock_orders]
+
+@app.post("/api/restock-orders", response_model=RestockOrder, status_code=201)
+def create_restock_order(request: CreateRestockOrderRequest):
+    """Submit a restock order for the selected demand shortages"""
+    items = []
+    lead_time_days = 0
+
+    for item in request.items:
+        inventory_item = next((inv for inv in inventory_items if inv["sku"] == item.sku), None)
+        category = inventory_item["category"] if inventory_item else (item.category or "Unknown")
+        # A consignment is gated by its slowest line item
+        lead_time_days = max(
+            lead_time_days,
+            RESTOCK_LEAD_TIME_DAYS.get(category, DEFAULT_LEAD_TIME_DAYS)
+        )
+        items.append({
+            "sku": item.sku,
+            "name": item.name,
+            "quantity": item.quantity,
+            "unit_cost": item.unit_cost,
+            "category": category
+        })
+
+    created = datetime.now().replace(microsecond=0)
+    next_number = len(restock_orders) + 1
+
+    restock_order = {
+        "id": str(next_number),
+        # RST- prefix keeps these out of the ORD-2025-NNNN space owned by orders.json
+        "order_number": f"RST-{created.year}-{next_number:04d}",
+        "items": items,
+        "status": "Submitted",
+        "created_date": created.strftime("%Y-%m-%dT%H:%M:%S"),
+        "expected_delivery": (created + timedelta(days=lead_time_days)).strftime("%Y-%m-%dT%H:%M:%S"),
+        "lead_time_days": lead_time_days,
+        "total_value": round(sum(i["quantity"] * i["unit_cost"] for i in items), 2),
+        "budget": request.budget
+    }
+
+    # In-place append so the module-level list stays the one bound at import time
+    restock_orders.append(restock_order)
+    return dict(restock_order)
 
 @app.get("/api/dashboard/summary")
 def get_dashboard_summary(
