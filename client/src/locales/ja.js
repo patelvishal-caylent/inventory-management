@@ -81,6 +81,8 @@ export default {
     skus: 'SKU',
     searchPlaceholder: '品目名で検索...',
     clearSearch: '検索をクリア',
+    lowStockOnly: '在庫僅少のみ',
+    lowStockBadge: '在庫僅少',
     totalItems: '総品目数',
     totalValue: '総価値',
     lowStockItems: '在庫僅少品目',
