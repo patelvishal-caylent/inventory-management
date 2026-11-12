@@ -11,26 +11,36 @@
       <div class="card">
         <div class="card-header">
           <h3 class="card-title">{{ t('inventory.stockLevels') }} ({{ filteredItems.length }} {{ t('inventory.skus') }})</h3>
-          <div class="search-box">
-            <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-              <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
-            </svg>
-            <input
-              v-model="searchQuery"
-              type="text"
-              :placeholder="t('inventory.searchPlaceholder')"
-              class="search-input"
-            />
-            <button
-              v-if="searchQuery"
-              @click="searchQuery = ''"
-              class="clear-search"
-              :title="t('inventory.clearSearch')"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+          <div class="header-controls">
+            <label class="low-stock-toggle">
+              <input
+                v-model="lowStockOnly"
+                type="checkbox"
+                class="low-stock-toggle-input"
+              />
+              <span>{{ t('inventory.lowStockOnly') }}</span>
+            </label>
+            <div class="search-box">
+              <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
               </svg>
-            </button>
+              <input
+                v-model="searchQuery"
+                type="text"
+                :placeholder="t('inventory.searchPlaceholder')"
+                class="search-input"
+              />
+              <button
+                v-if="searchQuery"
+                @click="searchQuery = ''"
+                class="clear-search"
+                :title="t('inventory.clearSearch')"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
         <div class="table-container">
@@ -55,7 +65,12 @@
                 class="clickable-row"
                 @click="showItemDetail(item)"
               >
-                <td><strong>{{ item.sku }}</strong></td>
+                <td>
+                  <strong>{{ item.sku }}</strong>
+                  <span v-if="isBelowReorderPoint(item)" class="badge danger low-stock-badge">
+                    {{ t('inventory.lowStockBadge') }}
+                  </span>
+                </td>
                 <td>{{ translateProductName(item.name) }}</td>
                 <td>{{ translateCategory(item.category) }}</td>
                 <td><strong>{{ item.quantity_on_hand }}</strong></td>
@@ -85,10 +100,22 @@
 
 <script>
 import { ref, onMounted, watch, computed } from 'vue'
+import axios from 'axios'
 import { api } from '../api'
 import { useFilters } from '../composables/useFilters'
 import { useI18n } from '../composables/useI18n'
+import { useLowStockOnlyPreference } from '../composables/useLowStockOnlyPreference'
 import InventoryDetailModal from '../components/InventoryDetailModal.vue'
+
+const LOW_STOCK_URL = 'http://localhost:8001/api/inventory/low-stock'
+
+const getLowStockInventory = async ({ warehouse, category } = {}) => {
+  const params = {}
+  if (warehouse && warehouse !== 'all') params.warehouse = warehouse
+  if (category && category !== 'all') params.category = category
+  const response = await axios.get(LOW_STOCK_URL, { params })
+  return response.data
+}
 
 export default {
   name: 'Inventory',
@@ -106,6 +133,9 @@ export default {
     const error = ref(null)
     const items = ref([])
     const searchQuery = ref('')
+    // Restored synchronously so the first request already honors a stored "on"
+    const { lowStockOnly } = useLowStockOnlyPreference()
+    let latestRequestId = 0
 
     // Modal state
     const showItemModal = ref(false)
@@ -116,6 +146,8 @@ export default {
 
     // Stock status order for sorting (using status keys)
     const STATUS_ORDER = { 'lowStock': 0, 'adequate': 1, 'inStock': 2 }
+
+    const isBelowReorderPoint = (item) => item.quantity_on_hand < item.reorder_point
 
     // Get stock status key (for sorting and translation)
     const getStockStatusKey = (item) => {
@@ -140,6 +172,11 @@ export default {
         )
       }
 
+      // Low-stock rows arrive pre-sorted by shortfall from the server
+      if (lowStockOnly.value) {
+        return filtered
+      }
+
       // Sort by stock status: Low Stock first, then Adequate, then In Stock
       // Always create a copy to avoid mutating the original array
       return filtered.slice().sort((a, b) => {
@@ -150,23 +187,35 @@ export default {
     })
 
     const loadInventory = async () => {
+      const requestId = ++latestRequestId
       try {
         loading.value = true
+        error.value = null
         const filters = getCurrentFilters()
         // Inventory doesn't support month/status filters, only warehouse and category
-        items.value = await api.getInventory({
+        const inventoryFilters = {
           warehouse: filters.warehouse,
           category: filters.category
-        })
+        }
+        const data = lowStockOnly.value
+          ? await getLowStockInventory(inventoryFilters)
+          : await api.getInventory(inventoryFilters)
+        if (requestId === latestRequestId) {
+          items.value = data
+        }
       } catch (err) {
-        error.value = 'Failed to load inventory: ' + err.message
+        if (requestId === latestRequestId) {
+          error.value = 'Failed to load inventory: ' + err.message
+        }
       } finally {
-        loading.value = false
+        if (requestId === latestRequestId) {
+          loading.value = false
+        }
       }
     }
 
-    // Watch for filter changes and reload data
-    watch([selectedLocation, selectedCategory], () => {
+    // Watch for filter or low-stock toggle changes and reload data
+    watch([selectedLocation, selectedCategory, lowStockOnly], () => {
       loadInventory()
     })
 
@@ -209,7 +258,9 @@ export default {
       error,
       items,
       searchQuery,
+      lowStockOnly,
       filteredItems,
+      isBelowReorderPoint,
       getStockStatus,
       getStockStatusClass,
       translateCategory,
@@ -252,6 +303,37 @@ export default {
   font-weight: 600;
   color: #0f172a;
   margin: 0;
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.low-stock-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: #0f172a;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.low-stock-toggle-input {
+  width: 16px;
+  height: 16px;
+  accent-color: #0f172a;
+  cursor: pointer;
+}
+
+.low-stock-badge {
+  margin-left: 0.5rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.625rem;
+  vertical-align: middle;
 }
 
 .search-box {

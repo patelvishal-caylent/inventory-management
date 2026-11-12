@@ -142,3 +142,128 @@ class TestInventoryEndpoints:
         # All items should be Power Supplies
         for item in data:
             assert item["category"].lower() == "power supplies"
+
+
+class TestLowStockInventoryEndpoint:
+    """Test suite for GET /api/inventory/low-stock."""
+
+    def test_get_low_stock_only_below_reorder_point(self, client):
+        """AC1: only items with quantity_on_hand < reorder_point are returned."""
+        response = client.get("/api/inventory/low-stock")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) > 0
+
+        for item in data:
+            assert item["quantity_on_hand"] < item["reorder_point"]
+
+        expected_skus = {
+            item["sku"]
+            for item in client.get("/api/inventory").json()
+            if item["quantity_on_hand"] < item["reorder_point"]
+        }
+        assert {item["sku"] for item in data} == expected_skus
+
+    def test_low_stock_excludes_items_at_reorder_point(self, client):
+        """AC1: items exactly at their reorder point are not low stock."""
+        at_reorder_point = {
+            item["sku"]
+            for item in client.get("/api/inventory").json()
+            if item["quantity_on_hand"] == item["reorder_point"]
+        }
+        low_stock_skus = {item["sku"] for item in client.get("/api/inventory/low-stock").json()}
+        assert not (at_reorder_point & low_stock_skus)
+
+    def test_low_stock_item_fields_and_shortfall(self, client):
+        """AC2: all InventoryItem fields plus shortfall = reorder_point - quantity_on_hand."""
+        data = client.get("/api/inventory/low-stock").json()
+        inventory_by_id = {item["id"]: item for item in client.get("/api/inventory").json()}
+
+        required_fields = [
+            "id", "sku", "name", "category", "warehouse",
+            "quantity_on_hand", "reorder_point", "unit_cost",
+            "location", "last_updated", "shortfall"
+        ]
+
+        for item in data:
+            for field in required_fields:
+                assert field in item, f"Missing field: {field}"
+            assert isinstance(item["shortfall"], int)
+            assert item["shortfall"] == item["reorder_point"] - item["quantity_on_hand"]
+            assert item["shortfall"] > 0
+
+            original = inventory_by_id[item["id"]]
+            for field, value in original.items():
+                assert item[field] == value
+
+    def test_low_stock_sorted_by_shortfall_desc_then_sku(self, client):
+        """AC3: sorted by shortfall descending, ties broken by sku ascending."""
+        data = client.get("/api/inventory/low-stock").json()
+        keys = [(-item["shortfall"], item["sku"]) for item in data]
+        assert keys == sorted(keys)
+
+    def test_low_stock_tie_broken_by_sku(self, client):
+        """AC3: with the seed data, PSU-508 and TMP-201 tie on shortfall 25."""
+        data = client.get("/api/inventory/low-stock").json()
+        skus = [item["sku"] for item in data]
+        assert skus == ["PSU-508", "TMP-201", "SRV-301", "SRV-302"]
+
+    def test_get_low_stock_by_warehouse(self, client):
+        """AC4: warehouse filter matches /api/inventory semantics."""
+        response = client.get("/api/inventory/low-stock?warehouse=Tokyo")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert len(data) > 0
+        for item in data:
+            assert item["warehouse"] == "Tokyo"
+
+        expected_skus = {
+            item["sku"]
+            for item in client.get("/api/inventory?warehouse=Tokyo").json()
+            if item["quantity_on_hand"] < item["reorder_point"]
+        }
+        assert {item["sku"] for item in data} == expected_skus
+
+    def test_get_low_stock_by_category(self, client):
+        """AC4: category filter is case-insensitive like /api/inventory."""
+        response = client.get("/api/inventory/low-stock?category=actuators")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert len(data) > 0
+        for item in data:
+            assert item["category"].lower() == "actuators"
+
+    def test_get_low_stock_multiple_filters(self, client):
+        """AC4: warehouse and category combine."""
+        response = client.get("/api/inventory/low-stock?warehouse=London&category=Sensors")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert [item["sku"] for item in data] == ["TMP-201"]
+
+    def test_get_low_stock_with_all_filter(self, client):
+        """AC4: 'all' behaves the same as no filter."""
+        response_all = client.get("/api/inventory/low-stock?warehouse=all&category=all")
+        response_no_filter = client.get("/api/inventory/low-stock")
+        assert response_all.status_code == 200
+        assert response_all.json() == response_no_filter.json()
+
+    def test_get_low_stock_empty_result(self, client):
+        """AC4/AC6: filters that match no low-stock items return an empty list."""
+        response = client.get("/api/inventory/low-stock?warehouse=San Francisco")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_low_stock_route_not_captured_by_item_route(self, client):
+        """AC5: /low-stock returns the list, not a 404 for item id 'low-stock'."""
+        response = client.get("/api/inventory/low-stock")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
+        # The item route still works for real ids
+        first_id = client.get("/api/inventory").json()[0]["id"]
+        assert client.get(f"/api/inventory/{first_id}").status_code == 200
