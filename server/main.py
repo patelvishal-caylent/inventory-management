@@ -167,6 +167,11 @@ restock_orders: List[dict] = []
 def root():
     return {"message": "Factory Inventory Management System API", "version": "1.0.0"}
 
+@app.get("/api/health")
+def health_check():
+    """Liveness check reporting how many inventory items are loaded"""
+    return {"status": "ok", "items": len(inventory_items)}
+
 @app.get("/api/inventory", response_model=List[InventoryItem])
 def get_inventory(
     warehouse: Optional[str] = None,

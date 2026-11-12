@@ -241,3 +241,17 @@ class TestRootEndpoint:
         assert "version" in data
         assert isinstance(data["message"], str)
         assert isinstance(data["version"], str)
+
+
+class TestHealthEndpoint:
+    """Test suite for the health check endpoint."""
+
+    def test_health_check(self, client):
+        """Test health check returns ok status and loaded inventory item count."""
+        response = client.get("/api/health")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["status"] == "ok"
+        assert isinstance(data["items"], int)
+        assert data["items"] == len(client.get("/api/inventory").json())
