@@ -85,6 +85,10 @@ export default {
     totalValue: '総価値',
     lowStockItems: '在庫僅少品目',
     warehouses: '倉庫',
+    lowStockOnly: '在庫不足のみ表示',
+    lowStockBadge: '在庫不足',
+    shortfallTooltip: '再注文点まで {shortfall} 個不足',
+    noLowStockItems: '再注文点を下回る品目はありません',
     table: {
       sku: 'SKU',
       itemName: '品目名',
@@ -94,6 +98,7 @@ export default {
       quantity: '数量',
       quantityOnHand: '手持在庫数',
       reorderPoint: '再注文点',
+      shortfall: '不足数',
       unitCost: '単価',
       unitPrice: '単価',
       totalValue: '総価値',
