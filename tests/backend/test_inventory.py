@@ -142,3 +142,60 @@ class TestInventoryEndpoints:
         # All items should be Power Supplies
         for item in data:
             assert item["category"].lower() == "power supplies"
+
+
+class TestLowStockEndpoint:
+    """Tests for GET /api/inventory/low-stock."""
+
+    def test_only_items_below_reorder_point(self, client):
+        """Criterion 1: only quantity_on_hand < reorder_point is returned."""
+        all_items = client.get("/api/inventory").json()
+        expected = {i["id"] for i in all_items if i["quantity_on_hand"] < i["reorder_point"]}
+
+        response = client.get("/api/inventory/low-stock")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) > 0
+        assert {i["id"] for i in data} == expected
+        for item in data:
+            assert item["quantity_on_hand"] < item["reorder_point"]
+
+    def test_includes_inventory_fields_and_shortfall(self, client):
+        """Criterion 2: all InventoryItem fields plus shortfall."""
+        by_id = {i["id"]: i for i in client.get("/api/inventory").json()}
+        data = client.get("/api/inventory/low-stock").json()
+        assert len(data) > 0
+        for item in data:
+            assert item["shortfall"] == item["reorder_point"] - item["quantity_on_hand"]
+            for key, value in by_id[item["id"]].items():
+                assert item[key] == value
+
+    def test_sorted_by_shortfall_desc_then_sku_asc(self, client):
+        """Criterion 3: shortfall descending, ties broken by sku ascending."""
+        data = client.get("/api/inventory/low-stock").json()
+        keys = [(-i["shortfall"], i["sku"]) for i in data]
+        assert keys == sorted(keys)
+
+    def test_honors_warehouse_and_category_filters(self, client):
+        """Criterion 4: same filter semantics as /api/inventory."""
+        data = client.get("/api/inventory/low-stock?warehouse=San Francisco").json()
+        assert all(i["warehouse"] == "San Francisco" for i in data)
+
+        data = client.get("/api/inventory/low-stock?category=circuit boards").json()
+        assert all(i["category"].lower() == "circuit boards" for i in data)
+
+        unfiltered = client.get("/api/inventory/low-stock").json()
+        all_filter = client.get("/api/inventory/low-stock?warehouse=all&category=all").json()
+        assert all_filter == unfiltered
+
+    def test_empty_result_via_filters(self, client):
+        """Criteria 4 and 6: filters matching nothing give an empty list, not an error."""
+        response = client.get("/api/inventory/low-stock?warehouse=Nowhere")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_not_captured_by_item_id_route(self, client):
+        """Criterion 5: 'low-stock' returns the list, never a 404 item lookup."""
+        response = client.get("/api/inventory/low-stock")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
