@@ -142,3 +142,106 @@ class TestInventoryEndpoints:
         # All items should be Power Supplies
         for item in data:
             assert item["category"].lower() == "power supplies"
+
+
+LOW_STOCK_FIELDS = [
+    "id",
+    "sku",
+    "name",
+    "category",
+    "warehouse",
+    "quantity_on_hand",
+    "reorder_point",
+    "unit_cost",
+    "location",
+    "last_updated",
+    "shortfall",
+]
+
+
+def _expected_low_stock_ids(client, params):
+    """Ids from GET /api/inventory (same params) with quantity_on_hand < reorder_point."""
+    items = client.get("/api/inventory", params=params).json()
+    return {i["id"] for i in items if i["quantity_on_hand"] < i["reorder_point"]}
+
+
+class TestLowStockEndpoint:
+    """Test suite for GET /api/inventory/low-stock (issue #5)."""
+
+    def test_low_stock_matches_strictly_below_reorder_point(self, client):
+        """AC-1: only items with quantity_on_hand < reorder_point, matching /api/inventory."""
+        response = client.get("/api/inventory/low-stock")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) > 0
+        for item in data:
+            assert item["quantity_on_hand"] < item["reorder_point"]
+        assert {i["id"] for i in data} == _expected_low_stock_ids(client, {})
+
+    def test_low_stock_item_fields_and_shortfall(self, client):
+        """AC-2: all inventory fields plus shortfall = reorder_point - quantity_on_hand > 0."""
+        data = client.get("/api/inventory/low-stock").json()
+        assert len(data) > 0
+
+        for item in data:
+            for field in LOW_STOCK_FIELDS:
+                assert field in item, f"Missing field: {field}"
+            assert item["shortfall"] > 0
+            assert item["shortfall"] == item["reorder_point"] - item["quantity_on_hand"]
+
+    def test_low_stock_sorted_by_shortfall_then_sku(self, client):
+        """AC-3: worst shortfall first, ties broken by sku ascending."""
+        data = client.get("/api/inventory/low-stock").json()
+        assert len(data) > 1
+        assert data == sorted(data, key=lambda i: (-i["shortfall"], i["sku"]))
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"warehouse": "Tokyo"},
+            {"category": "Actuators"},
+            {"category": "actuators"},
+            {"warehouse": "Tokyo", "category": "Power Supplies"},
+            {"warehouse": "London", "category": "Sensors"},
+            {"warehouse": "all", "category": "all"},
+        ],
+    )
+    def test_low_stock_filters_match_inventory_subset(self, client, params):
+        """AC-4: filters behave like GET /api/inventory (warehouse exact, category case-insensitive)."""
+        response = client.get("/api/inventory/low-stock", params=params)
+        assert response.status_code == 200
+
+        data = response.json()
+        for item in data:
+            if params.get("warehouse", "all") != "all":
+                assert item["warehouse"] == params["warehouse"]
+            if params.get("category", "all") != "all":
+                assert item["category"].lower() == params["category"].lower()
+        assert {i["id"] for i in data} == _expected_low_stock_ids(client, params)
+        if params != {"warehouse": "all", "category": "all"}:
+            assert len(data) > 0
+
+    def test_low_stock_warehouse_all_same_count_as_no_filter(self, client):
+        """AC-4: warehouse=all returns the same count as no filter."""
+        all_filter = client.get("/api/inventory/low-stock?warehouse=all")
+        no_filter = client.get("/api/inventory/low-stock")
+        assert all_filter.status_code == 200
+        assert len(all_filter.json()) == len(no_filter.json())
+        assert len(no_filter.json()) > 0
+
+    def test_low_stock_nonmatching_filter_returns_empty_list(self, client):
+        """AC-4/AC-5: a nonmatching filter yields 200 with [], not 404."""
+        response = client.get("/api/inventory/low-stock?warehouse=Nowhere")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_low_stock_route_not_shadowed_by_item_id(self, client):
+        """AC-5: low-stock is not captured by /{item_id}; unknown ids still 404."""
+        response = client.get("/api/inventory/low-stock")
+        assert response.status_code != 404
+        assert isinstance(response.json(), list)
+
+        missing = client.get("/api/inventory/nonexistent-id-999")
+        assert missing.status_code == 404
