@@ -104,6 +104,7 @@ import axios from 'axios'
 import { api } from '../api'
 import { useFilters } from '../composables/useFilters'
 import { useI18n } from '../composables/useI18n'
+import { useLowStockOnlyPreference } from '../composables/useLowStockOnlyPreference'
 import InventoryDetailModal from '../components/InventoryDetailModal.vue'
 
 const LOW_STOCK_URL = 'http://localhost:8001/api/inventory/low-stock'
@@ -132,7 +133,8 @@ export default {
     const error = ref(null)
     const items = ref([])
     const searchQuery = ref('')
-    const lowStockOnly = ref(false)
+    // Restored synchronously so the first request already honors a stored "on"
+    const { lowStockOnly } = useLowStockOnlyPreference()
     let latestRequestId = 0
 
     // Modal state
