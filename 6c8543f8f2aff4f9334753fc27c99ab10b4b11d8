@@ -1,0 +1,1 @@
+{"description": "Persist Inventory low-stock toggle in localStorage via useLowStockPreference composable", "model_id": "global.anthropic.claude-sonnet-5-5", "session_id": "79af9ac5-2f04-4a84-a892-830cceed6f72", "agent_version": "d0505e2f4e93bf88ef910e7eddee6441c4f0916e", "agent_type": "engineering_agent", "timestamp": "2026-11-12T14:31:09.331802+00:00"}
