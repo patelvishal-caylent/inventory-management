@@ -1,7 +1,23 @@
 """
-Tests for miscellaneous API endpoints (demand, backlog, spending).
+Tests for miscellaneous API endpoints (health, demand, backlog, spending).
 """
 import pytest
+
+
+class TestHealthEndpoint:
+    """Test suite for the read-only health endpoint."""
+
+    def test_get_health(self, client):
+        """Test health reports the loaded inventory count without changing data."""
+        inventory_response = client.get("/api/inventory")
+        assert inventory_response.status_code == 200
+        inventory = inventory_response.json()
+
+        response = client.get("/api/health")
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok", "items": len(inventory)}
+        assert client.get("/api/inventory").json() == inventory
 
 
 class TestDemandEndpoints:

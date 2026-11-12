@@ -70,6 +70,10 @@ app.add_middleware(
 )
 
 # Data models
+class HealthResponse(BaseModel):
+    status: str
+    items: int
+
 class InventoryItem(BaseModel):
     id: str
     sku: str
@@ -166,6 +170,11 @@ restock_orders: List[dict] = []
 @app.get("/")
 def root():
     return {"message": "Factory Inventory Management System API", "version": "1.0.0"}
+
+@app.get("/api/health", response_model=HealthResponse)
+def get_health():
+    """Confirm the API is up and report the loaded inventory item count."""
+    return HealthResponse(status="ok", items=len(inventory_items))
 
 @app.get("/api/inventory", response_model=List[InventoryItem])
 def get_inventory(
