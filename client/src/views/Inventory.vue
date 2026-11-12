@@ -11,6 +11,10 @@
       <div class="card">
         <div class="card-header">
           <h3 class="card-title">{{ t('inventory.stockLevels') }} ({{ filteredItems.length }} {{ t('inventory.skus') }})</h3>
+          <label class="low-stock-toggle">
+            <input v-model="lowStockOnly" type="checkbox" />
+            <span>{{ t('inventory.lowStockOnly') }}</span>
+          </label>
           <div class="search-box">
             <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
@@ -56,7 +60,12 @@
                 @click="showItemDetail(item)"
               >
                 <td><strong>{{ item.sku }}</strong></td>
-                <td>{{ translateProductName(item.name) }}</td>
+                <td>
+                  {{ translateProductName(item.name) }}
+                  <span v-if="isBelowReorderPoint(item)" class="badge danger low-stock-badge">
+                    {{ t('inventory.lowStockBadge') }}
+                  </span>
+                </td>
                 <td>{{ translateCategory(item.category) }}</td>
                 <td><strong>{{ item.quantity_on_hand }}</strong></td>
                 <td>{{ item.reorder_point }}</td>
@@ -85,10 +94,14 @@
 
 <script>
 import { ref, onMounted, watch, computed } from 'vue'
+import axios from 'axios'
 import { api } from '../api'
 import { useFilters } from '../composables/useFilters'
 import { useI18n } from '../composables/useI18n'
+import { readLowStockOnly, writeLowStockOnly } from '../composables/useLowStockPreference'
 import InventoryDetailModal from '../components/InventoryDetailModal.vue'
+
+const API_BASE_URL = 'http://localhost:8001/api'
 
 export default {
   name: 'Inventory',
@@ -106,6 +119,8 @@ export default {
     const error = ref(null)
     const items = ref([])
     const searchQuery = ref('')
+    // Restored synchronously so the first load already uses the persisted mode
+    const lowStockOnly = ref(readLowStockOnly())
 
     // Modal state
     const showItemModal = ref(false)
@@ -140,6 +155,11 @@ export default {
         )
       }
 
+      // Low-stock mode keeps the order returned by the server (shortfall desc, sku asc)
+      if (lowStockOnly.value) {
+        return filtered
+      }
+
       // Sort by stock status: Low Stock first, then Adequate, then In Stock
       // Always create a copy to avoid mutating the original array
       return filtered.slice().sort((a, b) => {
@@ -152,12 +172,21 @@ export default {
     const loadInventory = async () => {
       try {
         loading.value = true
+        error.value = null
         const filters = getCurrentFilters()
         // Inventory doesn't support month/status filters, only warehouse and category
-        items.value = await api.getInventory({
-          warehouse: filters.warehouse,
-          category: filters.category
-        })
+        if (lowStockOnly.value) {
+          const params = {}
+          if (filters.warehouse && filters.warehouse !== 'all') params.warehouse = filters.warehouse
+          if (filters.category && filters.category !== 'all') params.category = filters.category
+          const response = await axios.get(`${API_BASE_URL}/inventory/low-stock`, { params })
+          items.value = response.data
+        } else {
+          items.value = await api.getInventory({
+            warehouse: filters.warehouse,
+            category: filters.category
+          })
+        }
       } catch (err) {
         error.value = 'Failed to load inventory: ' + err.message
       } finally {
@@ -166,9 +195,15 @@ export default {
     }
 
     // Watch for filter changes and reload data
-    watch([selectedLocation, selectedCategory], () => {
+    watch([selectedLocation, selectedCategory, lowStockOnly], () => {
       loadInventory()
     })
+
+    // Persist the toggle immediately on change (sync flush: no reload or tick needed)
+    watch(lowStockOnly, (value) => writeLowStockOnly(value), { flush: 'sync' })
+
+    // Strict < (differs from the Status column's <=); matches the low-stock endpoint
+    const isBelowReorderPoint = (item) => item.quantity_on_hand < item.reorder_point
 
     const getStockStatus = (item) => {
       const key = getStockStatusKey(item)
@@ -209,6 +244,8 @@ export default {
       error,
       items,
       searchQuery,
+      lowStockOnly,
+      isBelowReorderPoint,
       filteredItems,
       getStockStatus,
       getStockStatusClass,
@@ -252,6 +289,21 @@ export default {
   font-weight: 600;
   color: #0f172a;
   margin: 0;
+}
+
+.low-stock-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+  font-size: 0.875rem;
+  color: #0f172a;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.low-stock-badge {
+  margin-left: 0.5rem;
 }
 
 .search-box {
