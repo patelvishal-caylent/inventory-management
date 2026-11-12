@@ -85,6 +85,10 @@ export default {
     totalValue: 'Total Value',
     lowStockItems: 'Low Stock Items',
     warehouses: 'Warehouses',
+    lowStockOnly: 'Low stock only',
+    lowStockBadge: 'Low stock',
+    shortfallTooltip: 'Short by {shortfall} units below reorder point',
+    noLowStockItems: 'No items are below their reorder point',
     table: {
       sku: 'SKU',
       itemName: 'Item Name',
@@ -94,6 +98,7 @@ export default {
       quantity: 'Quantity',
       quantityOnHand: 'Quantity on Hand',
       reorderPoint: 'Reorder Point',
+      shortfall: 'Shortfall',
       unitCost: 'Unit Cost',
       unitPrice: 'Unit Price',
       totalValue: 'Total Value',
