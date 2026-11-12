@@ -98,6 +98,7 @@ import axios from 'axios'
 import { api } from '../api'
 import { useFilters } from '../composables/useFilters'
 import { useI18n } from '../composables/useI18n'
+import { readLowStockOnly, writeLowStockOnly } from '../composables/useLowStockPreference'
 import InventoryDetailModal from '../components/InventoryDetailModal.vue'
 
 const API_BASE_URL = 'http://localhost:8001/api'
@@ -118,7 +119,8 @@ export default {
     const error = ref(null)
     const items = ref([])
     const searchQuery = ref('')
-    const lowStockOnly = ref(false)
+    // Restored synchronously so the first load already uses the persisted mode
+    const lowStockOnly = ref(readLowStockOnly())
 
     // Modal state
     const showItemModal = ref(false)
@@ -196,6 +198,9 @@ export default {
     watch([selectedLocation, selectedCategory, lowStockOnly], () => {
       loadInventory()
     })
+
+    // Persist the toggle immediately on change (sync flush: no reload or tick needed)
+    watch(lowStockOnly, (value) => writeLowStockOnly(value), { flush: 'sync' })
 
     // Strict < (differs from the Status column's <=); matches the low-stock endpoint
     const isBelowReorderPoint = (item) => item.quantity_on_hand < item.reorder_point
