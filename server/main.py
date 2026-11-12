@@ -82,6 +82,9 @@ class InventoryItem(BaseModel):
     location: str
     last_updated: str
 
+class LowStockItem(InventoryItem):
+    shortfall: int
+
 class Order(BaseModel):
     id: str
     order_number: str
@@ -174,6 +177,20 @@ def get_inventory(
 ):
     """Get all inventory items with optional filtering"""
     return apply_filters(inventory_items, warehouse, category)
+
+@app.get("/api/inventory/low-stock", response_model=List[LowStockItem])
+def get_low_stock_inventory(
+    warehouse: Optional[str] = None,
+    category: Optional[str] = None
+):
+    """Get inventory items below their reorder point, largest shortfall first"""
+    filtered = apply_filters(inventory_items, warehouse, category)
+    low_stock = [
+        {**item, "shortfall": item["reorder_point"] - item["quantity_on_hand"]}
+        for item in filtered
+        if item["quantity_on_hand"] < item["reorder_point"]
+    ]
+    return sorted(low_stock, key=lambda item: (-item["shortfall"], item["sku"]))
 
 @app.get("/api/inventory/{item_id}", response_model=InventoryItem)
 def get_inventory_item(item_id: str):

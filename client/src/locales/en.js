@@ -85,6 +85,8 @@ export default {
     totalValue: 'Total Value',
     lowStockItems: 'Low Stock Items',
     warehouses: 'Warehouses',
+    lowStockOnly: 'Low stock only',
+    lowStockBadge: 'Low stock',
     table: {
       sku: 'SKU',
       itemName: 'Item Name',

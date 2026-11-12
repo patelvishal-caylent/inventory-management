@@ -85,6 +85,8 @@ export default {
     totalValue: '総価値',
     lowStockItems: '在庫僅少品目',
     warehouses: '倉庫',
+    lowStockOnly: '在庫僅少のみ',
+    lowStockBadge: '在庫僅少',
     table: {
       sku: 'SKU',
       itemName: '品目名',

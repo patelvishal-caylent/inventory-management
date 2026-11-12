@@ -142,3 +142,119 @@ class TestInventoryEndpoints:
         # All items should be Power Supplies
         for item in data:
             assert item["category"].lower() == "power supplies"
+
+
+class TestLowStockEndpoint:
+    """Test suite for the low-stock inventory endpoint."""
+
+    @staticmethod
+    def _expected_low_stock(items):
+        """Build the expected low-stock list from raw inventory items."""
+        expected = [
+            {**item, "shortfall": item["reorder_point"] - item["quantity_on_hand"]}
+            for item in items
+            if item["quantity_on_hand"] < item["reorder_point"]
+        ]
+        return sorted(expected, key=lambda item: (-item["shortfall"], item["sku"]))
+
+    def test_get_low_stock_only_below_reorder_point(self, client):
+        """Test that only items strictly below their reorder point are returned (AC 1)."""
+        response = client.get("/api/inventory/low-stock")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) > 0
+
+        for item in data:
+            assert item["quantity_on_hand"] < item["reorder_point"]
+
+        all_items = client.get("/api/inventory").json()
+        expected_ids = {
+            item["id"] for item in all_items
+            if item["quantity_on_hand"] < item["reorder_point"]
+        }
+        assert {item["id"] for item in data} == expected_ids
+
+    def test_low_stock_item_fields_and_shortfall(self, client):
+        """Test that items include all InventoryItem fields plus shortfall (AC 2)."""
+        all_items = {item["id"]: item for item in client.get("/api/inventory").json()}
+        data = client.get("/api/inventory/low-stock").json()
+        assert len(data) > 0
+
+        for item in data:
+            original = all_items[item["id"]]
+            for field, value in original.items():
+                assert item[field] == value, f"Mismatch in field: {field}"
+            assert set(item.keys()) == set(original.keys()) | {"shortfall"}
+            assert isinstance(item["shortfall"], int)
+            assert item["shortfall"] == item["reorder_point"] - item["quantity_on_hand"]
+            assert item["shortfall"] > 0
+
+    def test_low_stock_sorted_by_shortfall_desc_then_sku(self, client):
+        """Test sorting by shortfall descending with sku ascending tie-break (AC 3)."""
+        data = client.get("/api/inventory/low-stock").json()
+        all_items = client.get("/api/inventory").json()
+
+        assert [item["sku"] for item in data] == [
+            item["sku"] for item in self._expected_low_stock(all_items)
+        ]
+
+        for current, following in zip(data, data[1:]):
+            assert current["shortfall"] >= following["shortfall"]
+            if current["shortfall"] == following["shortfall"]:
+                assert current["sku"] < following["sku"]
+
+    def test_low_stock_tie_broken_by_sku(self, client):
+        """Test that the dataset's equal-shortfall items are ordered by sku (AC 3)."""
+        data = client.get("/api/inventory/low-stock").json()
+        shortfalls = [item["shortfall"] for item in data]
+        tied = [s for s in set(shortfalls) if shortfalls.count(s) > 1]
+        assert tied, "Expected at least one shortfall tie in the mock data"
+
+        for shortfall in tied:
+            skus = [item["sku"] for item in data if item["shortfall"] == shortfall]
+            assert skus == sorted(skus)
+
+    @pytest.mark.parametrize("query", [
+        "warehouse=Tokyo",
+        "category=Actuators",
+        "category=actuators",
+        "warehouse=Tokyo&category=Power Supplies",
+    ])
+    def test_get_low_stock_with_filters(self, client, query):
+        """Test that warehouse/category filters match GET /api/inventory semantics (AC 4)."""
+        response = client.get(f"/api/inventory/low-stock?{query}")
+        assert response.status_code == 200
+
+        filtered_inventory = client.get(f"/api/inventory?{query}").json()
+        data = response.json()
+        assert len(data) > 0
+        assert data == self._expected_low_stock(filtered_inventory)
+
+    def test_get_low_stock_with_all_filter(self, client):
+        """Test that 'all' filter values return the unfiltered result (AC 4)."""
+        response_all = client.get("/api/inventory/low-stock?warehouse=all&category=all")
+        response_no_filter = client.get("/api/inventory/low-stock")
+
+        assert response_all.status_code == 200
+        assert response_all.json() == response_no_filter.json()
+
+    def test_get_low_stock_empty_result_via_filters(self, client):
+        """Test that filters with no low-stock matches return an empty list (AC 4, 6)."""
+        response = client.get("/api/inventory/low-stock?warehouse=San Francisco")
+        assert response.status_code == 200
+        assert response.json() == []
+
+        response = client.get("/api/inventory/low-stock?category=Nonexistent Category")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_low_stock_route_not_captured_by_item_id(self, client):
+        """Test that /low-stock is not handled by /api/inventory/{item_id} (AC 5)."""
+        response = client.get("/api/inventory/low-stock")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
+        response = client.get("/api/inventory/nonexistent-id-999")
+        assert response.status_code == 404
