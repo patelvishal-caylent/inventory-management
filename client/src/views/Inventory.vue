@@ -100,6 +100,7 @@ import axios from 'axios'
 import { api } from '../api'
 import { useFilters } from '../composables/useFilters'
 import { useI18n } from '../composables/useI18n'
+import { useLowStockOnlyPreference } from '../composables/useLowStockOnlyPreference'
 import InventoryDetailModal from '../components/InventoryDetailModal.vue'
 
 const API_BASE_URL = 'http://localhost:8001/api'
@@ -120,7 +121,7 @@ export default {
     const error = ref(null)
     const items = ref([])
     const searchQuery = ref('')
-    const lowStockOnly = ref(false)
+    const { lowStockOnly } = useLowStockOnlyPreference()
     let latestRequestId = 0
 
     // Modal state
