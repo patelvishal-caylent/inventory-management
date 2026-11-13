@@ -85,6 +85,10 @@ class InventoryItem(BaseModel):
 class LowStockItem(InventoryItem):
     shortfall: int
 
+class WarehouseCount(BaseModel):
+    warehouse: str
+    count: int
+
 class Order(BaseModel):
     id: str
     order_number: str
@@ -191,6 +195,23 @@ def get_low_stock_inventory(
         if item["quantity_on_hand"] < item["reorder_point"]
     ]
     return sorted(low_stock, key=lambda item: (-item["shortfall"], item["sku"]))
+
+# Must be declared before /api/inventory/{item_id} so the static path matches first
+@app.get(
+    "/api/inventory/warehouses",
+    response_model=List[WarehouseCount],
+    tags=["inventory-v2"],
+    summary="Count inventory items per warehouse",
+)
+def get_inventory_warehouse_counts(category: Optional[str] = None):
+    """Get the number of inventory items per warehouse, largest count first"""
+    counts = {}
+    for item in apply_filters(inventory_items, category=category):
+        counts[item["warehouse"]] = counts.get(item["warehouse"], 0) + 1
+    return [
+        {"warehouse": warehouse, "count": count}
+        for warehouse, count in sorted(counts.items(), key=lambda entry: (-entry[1], entry[0]))
+    ]
 
 @app.get("/api/inventory/{item_id}", response_model=InventoryItem)
 def get_inventory_item(item_id: str):
