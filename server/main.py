@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
+from collections import Counter
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 from mock_data import inventory_items, orders, demand_forecasts, backlog_items, spending_summary, monthly_spending, category_spending, recent_transactions, purchase_orders
@@ -84,6 +85,10 @@ class InventoryItem(BaseModel):
 
 class LowStockItem(InventoryItem):
     shortfall: int
+
+class WarehouseCount(BaseModel):
+    warehouse: str
+    count: int
 
 class Order(BaseModel):
     id: str
@@ -191,6 +196,21 @@ def get_low_stock_inventory(
         if item["quantity_on_hand"] < item["reorder_point"]
     ]
     return sorted(low_stock, key=lambda item: (-item["shortfall"], item["sku"]))
+
+# Must be declared before /api/inventory/{item_id} so the static path matches first
+@app.get(
+    "/api/inventory/warehouses",
+    response_model=List[WarehouseCount],
+    tags=["inventory-v2"],
+    summary="Count inventory items per warehouse",
+)
+def get_inventory_warehouse_counts(category: Optional[str] = None):
+    """Count inventory items per warehouse, largest count first"""
+    counts = Counter(item["warehouse"] for item in apply_filters(inventory_items, category=category))
+    return [
+        {"warehouse": warehouse, "count": count}
+        for warehouse, count in sorted(counts.items(), key=lambda wc: (-wc[1], wc[0]))
+    ]
 
 @app.get("/api/inventory/{item_id}", response_model=InventoryItem)
 def get_inventory_item(item_id: str):
