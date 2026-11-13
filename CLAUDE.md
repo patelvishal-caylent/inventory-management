@@ -74,3 +74,14 @@ npm install && npm run dev
 - Status: green/blue/yellow/red
 - Charts: Custom SVG, CSS Grid for layouts
 - No emojis in UI
+
+## Mandatory Spec-Driven Workflow
+Every code change made for a GitHub issue follows this workflow. It applies to all contributors, human and agent.
+
+1. Before changing any code, create `specs/<issue-number>/spec.md` from `specs/templates/spec.md` and `specs/<issue-number>/plan.md` from `specs/templates/plan.md`. Keep the template's section headings, in the template's order.
+2. Every acceptance criterion gets an ID (`AC-1`, `AC-2`, ...) and a named verification.
+3. Leave `Status: draft` in both files. Only a human changes status to `approved`. Never write `approved` yourself.
+4. Commit the spec and plan on their own, as the first commit on the branch, with the message `spec(#<issue-number>): <summary>`. No code in that commit.
+5. Every later commit message ends with the trailer `Spec: specs/<issue-number>/spec.md`.
+6. Each new test's docstring names the criterion it proves, for example `"""AC-2: ..."""`.
+7. The pull request description includes an "AC coverage" table mapping every AC ID to its test.
