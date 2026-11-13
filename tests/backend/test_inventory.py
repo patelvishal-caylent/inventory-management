@@ -245,3 +245,96 @@ class TestLowStockEndpoint:
 
         missing = client.get("/api/inventory/nonexistent-id-999")
         assert missing.status_code == 404
+
+
+def _expected_warehouse_counts(client, params):
+    """Per-warehouse item counts computed from GET /api/inventory with the same params."""
+    counts = {}
+    for item in client.get("/api/inventory", params=params).json():
+        counts[item["warehouse"]] = counts.get(item["warehouse"], 0) + 1
+    return counts
+
+
+class TestWarehouseCountsEndpoint:
+    """Test suite for GET /api/inventory/warehouses (issue #22)."""
+
+    def test_warehouse_counts_shape_and_values(self, client):
+        """AC-1: list of {warehouse, count} matching item counts from /api/inventory."""
+        response = client.get("/api/inventory/warehouses")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) > 0
+        for entry in data:
+            assert set(entry.keys()) == {"warehouse", "count"}
+            assert isinstance(entry["warehouse"], str)
+            assert isinstance(entry["count"], int)
+            assert entry["count"] > 0
+        assert {e["warehouse"]: e["count"] for e in data} == _expected_warehouse_counts(client, {})
+        assert len({e["warehouse"] for e in data}) == len(data)
+
+    def test_warehouse_counts_sorted_by_count_then_name(self, client):
+        """AC-2: sorted by count descending, ties broken by warehouse ascending."""
+        data = client.get("/api/inventory/warehouses").json()
+        assert len(data) > 1
+        assert data == sorted(data, key=lambda e: (-e["count"], e["warehouse"]))
+
+    def test_warehouse_counts_sort_tie_break(self, client, monkeypatch):
+        """AC-2: equal counts are ordered by warehouse name ascending."""
+        import main
+
+        def item(i, warehouse):
+            return {"id": str(i), "warehouse": warehouse, "category": "Sensors"}
+
+        fake = [item(1, "Tokyo"), item(2, "London"), item(3, "Berlin"),
+                item(4, "Berlin"), item(5, "Austin"), item(6, "Tokyo")]
+        monkeypatch.setattr(main, "inventory_items", fake)
+
+        data = client.get("/api/inventory/warehouses").json()
+        assert data == [
+            {"warehouse": "Berlin", "count": 2},
+            {"warehouse": "Tokyo", "count": 2},
+            {"warehouse": "Austin", "count": 1},
+            {"warehouse": "London", "count": 1},
+        ]
+
+    @pytest.mark.parametrize(
+        "params",
+        [
+            {"category": "Sensors"},
+            {"category": "sensors"},
+            {"category": "Power Supplies"},
+            {"category": "all"},
+        ],
+    )
+    def test_warehouse_counts_category_filter(self, client, params):
+        """AC-3: category filter has the same semantics as GET /api/inventory."""
+        response = client.get("/api/inventory/warehouses", params=params)
+        assert response.status_code == 200
+
+        data = response.json()
+        assert len(data) > 0
+        assert {e["warehouse"]: e["count"] for e in data} == _expected_warehouse_counts(client, params)
+
+    def test_warehouse_counts_category_all_same_as_no_filter(self, client):
+        """AC-3: category=all returns the same result as no filter."""
+        assert (
+            client.get("/api/inventory/warehouses?category=all").json()
+            == client.get("/api/inventory/warehouses").json()
+        )
+
+    def test_warehouse_counts_nonmatching_category_returns_empty_list(self, client):
+        """AC-3: a category with no items yields 200 with []."""
+        response = client.get("/api/inventory/warehouses?category=Nonexistent")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_warehouse_counts_route_not_shadowed_by_item_id(self, client):
+        """AC-4: /warehouses is not captured by /{item_id}; unknown ids still 404."""
+        response = client.get("/api/inventory/warehouses")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
+        missing = client.get("/api/inventory/nonexistent-id-999")
+        assert missing.status_code == 404
