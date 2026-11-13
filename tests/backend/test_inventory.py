@@ -245,3 +245,98 @@ class TestLowStockEndpoint:
 
         missing = client.get("/api/inventory/nonexistent-id-999")
         assert missing.status_code == 404
+
+
+def _expected_category_counts(client, params):
+    """Category -> item count, derived from GET /api/inventory with the same params."""
+    counts = {}
+    for item in client.get("/api/inventory", params=params).json():
+        counts[item["category"]] = counts.get(item["category"], 0) + 1
+    return counts
+
+
+class TestCategoryCountsEndpoint:
+    """Test suite for GET /api/inventory/categories (issue #19)."""
+
+    def test_category_counts_shape_and_values(self, client):
+        """AC-1: list of {category, count} objects whose counts match GET /api/inventory."""
+        response = client.get("/api/inventory/categories")
+        assert response.status_code == 200
+
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) > 0
+        for entry in data:
+            assert set(entry.keys()) == {"category", "count"}
+            assert isinstance(entry["category"], str)
+            assert isinstance(entry["count"], int)
+            assert entry["count"] > 0
+
+        categories = [entry["category"] for entry in data]
+        assert len(categories) == len(set(categories))
+        assert {e["category"]: e["count"] for e in data} == _expected_category_counts(client, {})
+        assert sum(e["count"] for e in data) == len(client.get("/api/inventory").json())
+
+    @pytest.mark.parametrize(
+        "params",
+        [{}, {"warehouse": "San Francisco"}, {"warehouse": "London"}, {"warehouse": "Tokyo"}],
+    )
+    def test_category_counts_sorted_by_count_then_category(self, client, params):
+        """AC-2: sorted by count descending, ties broken by category ascending."""
+        data = client.get("/api/inventory/categories", params=params).json()
+        assert len(data) > 1
+        assert data == sorted(data, key=lambda e: (-e["count"], e["category"]))
+
+    def test_category_counts_tie_broken_by_category_ascending(self, client, monkeypatch, sample_inventory_item):
+        """AC-2: equal counts are ordered by category name ascending."""
+        import main
+
+        def item(category):
+            return {**sample_inventory_item, "category": category}
+
+        synthetic = [item("Zeta"), item("Alpha"), item("Mid"), item("Mid"), item("Zeta"), item("Alpha"), item("Beta")]
+        monkeypatch.setattr(main, "inventory_items", synthetic)
+
+        data = client.get("/api/inventory/categories").json()
+        assert data == [
+            {"category": "Alpha", "count": 2},
+            {"category": "Mid", "count": 2},
+            {"category": "Zeta", "count": 2},
+            {"category": "Beta", "count": 1},
+        ]
+
+    @pytest.mark.parametrize("warehouse", ["San Francisco", "London", "Tokyo"])
+    def test_category_counts_warehouse_filter_matches_inventory(self, client, warehouse):
+        """AC-3: warehouse filter counts match GET /api/inventory?warehouse=<same>."""
+        response = client.get("/api/inventory/categories", params={"warehouse": warehouse})
+        assert response.status_code == 200
+
+        data = response.json()
+        assert len(data) > 0
+        expected = _expected_category_counts(client, {"warehouse": warehouse})
+        assert {e["category"]: e["count"] for e in data} == expected
+        assert expected != _expected_category_counts(client, {})
+
+    def test_category_counts_warehouse_all_same_as_no_filter(self, client):
+        """AC-3: warehouse=all returns the same result as no filter."""
+        all_filter = client.get("/api/inventory/categories?warehouse=all")
+        no_filter = client.get("/api/inventory/categories")
+        assert all_filter.status_code == 200
+        assert no_filter.status_code == 200
+        assert all_filter.json() == no_filter.json()
+
+    def test_category_counts_nonmatching_warehouse_returns_empty_list(self, client):
+        """AC-3: an unknown warehouse yields 200 with [], like GET /api/inventory."""
+        response = client.get("/api/inventory/categories?warehouse=Nowhere")
+        assert response.status_code == 200
+        assert response.json() == []
+        assert client.get("/api/inventory?warehouse=Nowhere").json() == []
+
+    def test_category_counts_route_not_shadowed_by_item_id(self, client):
+        """AC-4: categories is not captured by /{item_id}; unknown ids still 404."""
+        response = client.get("/api/inventory/categories")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
+        missing = client.get("/api/inventory/nonexistent-id-999")
+        assert missing.status_code == 404
