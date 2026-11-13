@@ -1,3 +1,4 @@
+from collections import Counter
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
@@ -84,6 +85,10 @@ class InventoryItem(BaseModel):
 
 class LowStockItem(InventoryItem):
     shortfall: int
+
+class CategoryCount(BaseModel):
+    category: str
+    count: int
 
 class Order(BaseModel):
     id: str
@@ -191,6 +196,15 @@ def get_low_stock_inventory(
         if item["quantity_on_hand"] < item["reorder_point"]
     ]
     return sorted(low_stock, key=lambda item: (-item["shortfall"], item["sku"]))
+
+@app.get("/api/inventory/categories", response_model=List[CategoryCount])
+def get_inventory_category_counts(warehouse: Optional[str] = None):
+    """Get inventory item counts per category, largest count first"""
+    counts = Counter(item["category"] for item in apply_filters(inventory_items, warehouse))
+    return [
+        {"category": category, "count": count}
+        for category, count in sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+    ]
 
 @app.get("/api/inventory/{item_id}", response_model=InventoryItem)
 def get_inventory_item(item_id: str):
